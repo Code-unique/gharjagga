@@ -127,44 +127,56 @@ export async function POST(request: NextRequest) {
     }
 
     // Create property with owner info
-    const property = await Property.create({
-      title: body.title,
-      description: body.description,
-      type: body.type || 'house',
-      status: body.status || 'for-sale',
-      price: parseInt(body.price),
-      area: parseInt(body.area),
-      areaUnit: body.areaUnit || 'sqft',
-      bedrooms: parseInt(body.bedrooms || '0'),
-      bathrooms: parseInt(body.bathrooms || '0'),
-      floors: parseInt(body.floors || '0'),
-      location: {
-        province: body.province || body.location?.province || 'Bagmati Province',
-        district: body.district || body.location?.district || 'Kathmandu',
-        city: body.city || body.location?.city || 'Kathmandu',
-        ward: body.ward ? parseInt(body.ward) : undefined,
-        tole: body.tole || undefined,
-      },
-      features: body.features || [],
-      images: body.images || [{ url: '/placeholder.svg', publicId: 'placeholder' }],
-      amenities: body.amenities || [],
-      nearby: body.nearby || [],
-      agent: {
-        name: body.agent?.name || clerkUser.fullName || 'Agent',
-        phone: body.agent?.phone || clerkUser.phoneNumbers?.[0]?.phoneNumber || '',
-        email: body.agent?.email || clerkUser.emailAddresses?.[0]?.emailAddress || '',
-      },
-      // ✅ Set owner
-      owner: {
-        clerkId: userId,
-        email: clerkUser.emailAddresses?.[0]?.emailAddress || '',
-        name: clerkUser.fullName || 'User',
-      },
-      featured: false,
-      views: 0,
-      listedDate: new Date(),
-      isActive: true,
-    });
+  const property = await Property.create({
+  title: body.title,
+  description: body.description,
+  type: body.type || 'house',
+  status: body.status || 'for-sale',
+  price: parseInt(body.price),
+  area: parseInt(body.area),
+
+  location: {
+    province: body.province || body.location?.province || 'Bagmati Province',
+    district: body.district || body.location?.district || 'Kathmandu',
+    city: body.city || body.location?.city || 'Kathmandu',
+    ward: body.ward ? parseInt(body.ward) : undefined,
+    tole: body.tole || undefined,
+  },
+
+  features:
+    typeof body.features === 'string'
+      ? JSON.parse(body.features)
+      : body.features || [],
+
+  amenities:
+    typeof body.amenities === 'string'
+      ? JSON.parse(body.amenities)
+      : body.amenities || [],
+
+  nearby:
+    typeof body.nearby === 'string'
+      ? JSON.parse(body.nearby)
+      : body.nearby || [],
+
+  images: body.images || [{ url: '/placeholder.svg', publicId: 'placeholder' }],
+
+  agent: {
+    name: body.agent?.name || clerkUser.fullName || 'Agent',
+    phone: body.agent?.phone || clerkUser.phoneNumbers?.[0]?.phoneNumber || '',
+    email: body.agent?.email || clerkUser.emailAddresses?.[0]?.emailAddress || '',
+  },
+
+  owner: {
+    clerkId: userId,
+    email: clerkUser.emailAddresses?.[0]?.emailAddress || '',
+    name: clerkUser.fullName || 'User',
+  },
+
+  featured: false,
+  views: 0,
+  listedDate: new Date(),
+  isActive: true,
+});
     
     return NextResponse.json(
       { success: true, message: 'Property created successfully', property }, 
