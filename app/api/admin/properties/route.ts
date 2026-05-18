@@ -1,21 +1,26 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { connectDB } from '@/lib/db';
 import { Property } from '@/lib/models/Property';
+import { User } from '@/lib/models/User';
 import { auth } from '@clerk/nextjs/server';
-import { isUserAdmin } from '@/lib/auth';
 
-// GET - Fetch all properties for admin
+// Helper to check admin
+async function requireAdmin(userId: string) {
+  await connectDB();
+  const user = await User.findOne({ clerkId: userId }).select('role').lean();
+  return user?.role === 'admin';
+}
+
 export async function GET(request: NextRequest) {
   try {
     const { userId } = await auth();
-    
     if (!userId) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    // Check if user is admin
-    const admin = await isUserAdmin(userId);
-    if (!admin) {
+    // ✅ Admin check
+    const isAdmin = await requireAdmin(userId);
+    if (!isAdmin) {
       return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
     }
 
@@ -27,12 +32,9 @@ export async function GET(request: NextRequest) {
     const status = searchParams.get('status');
     const search = searchParams.get('search');
 
-    // Build query
     const query: any = {};
     
-    if (status && status !== 'all') {
-      query.status = status;
-    }
+    if (status && status !== 'all') query.status = status;
     
     if (search) {
       query.$or = [
@@ -53,74 +55,42 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({
       properties,
-      pagination: {
-        total,
-        page,
-        pages: Math.ceil(total / limit),
-      }
+      pagination: { total, page, pages: Math.ceil(total / limit) }
     });
   } catch (error) {
-    console.error('Error fetching admin properties:', error);
-    return NextResponse.json(
-      { properties: [], pagination: { total: 0, page: 1, pages: 0 } },
-      { status: 200 }
-    );
+    console.error('Error:', error);
+    return NextResponse.json({ properties: [], pagination: { total: 0, page: 1, pages: 0 } });
   }
 }
 
-// PATCH - Bulk update properties
 export async function PATCH(request: NextRequest) {
   try {
     const { userId } = await auth();
-    
-    if (!userId) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
+    if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-    const admin = await isUserAdmin(userId);
-    if (!admin) {
-      return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
-    }
+    // ✅ Admin check
+    const isAdmin = await requireAdmin(userId);
+    if (!isAdmin) return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
 
     await connectDB();
-    const { propertyIds, action, data } = await request.json();
+    const { propertyIds, action } = await request.json();
 
-    if (!propertyIds || !Array.isArray(propertyIds) || propertyIds.length === 0) {
+    if (!propertyIds?.length) {
       return NextResponse.json({ error: 'No properties selected' }, { status: 400 });
     }
 
     let updateData = {};
-    
     switch (action) {
-      case 'delete':
-        updateData = { isActive: false };
-        break;
-      case 'feature':
-        updateData = { featured: true };
-        break;
-      case 'unfeature':
-        updateData = { featured: false };
-        break;
-      case 'status':
-        if (data?.status) {
-          updateData = { status: data.status };
-        }
-        break;
-      default:
-        return NextResponse.json({ error: 'Invalid action' }, { status: 400 });
+      case 'delete': updateData = { isActive: false }; break;
+      case 'feature': updateData = { featured: true }; break;
+      case 'unfeature': updateData = { featured: false }; break;
+      default: return NextResponse.json({ error: 'Invalid action' }, { status: 400 });
     }
 
-    await Property.updateMany(
-      { _id: { $in: propertyIds } },
-      updateData
-    );
+    await Property.updateMany({ _id: { $in: propertyIds } }, updateData);
 
-    return NextResponse.json({ 
-      success: true, 
-      message: `${propertyIds.length} properties updated successfully` 
-    });
+    return NextResponse.json({ success: true, message: `${propertyIds.length} properties updated` });
   } catch (error) {
-    console.error('Error updating properties:', error);
-    return NextResponse.json({ error: 'Failed to update properties' }, { status: 500 });
+    return NextResponse.json({ error: 'Failed to update' }, { status: 500 });
   }
 }

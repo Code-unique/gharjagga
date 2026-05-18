@@ -24,24 +24,24 @@ export default function DashboardPage() {
   }, [isLoaded, user])
 
   const fetchDashboardData = async () => {
-    try {
-      setLoading(true)
-      const [propertiesRes, statsRes] = await Promise.all([
-        fetch('/api/properties?limit=10'),
-        fetch('/api/dashboard/stats')
-      ])
-      
-      const propertiesData = await propertiesRes.json()
-      const statsData = await statsRes.json()
-      
-      setProperties(propertiesData.properties || [])
-      setStats(statsData)
-    } catch (error) {
-      console.error('Error fetching dashboard data:', error)
-    } finally {
-      setLoading(false)
-    }
+  try {
+    setLoading(true)
+    
+    // ✅ Only fetch properties owned by this user
+    const propertiesRes = await fetch(`/api/properties?ownerId=${user?.id}&limit=50`)
+    const propertiesData = await propertiesRes.json()
+    
+    const statsRes = await fetch('/api/dashboard/stats')
+    const statsData = await statsRes.json()
+    
+    setProperties(propertiesData.properties || [])
+    setStats(statsData)
+  } catch (error) {
+    console.error('Error fetching dashboard data:', error)
+  } finally {
+    setLoading(false)
   }
+}
 
   const handleDelete = async (id: string) => {
     if (!confirm('Are you sure you want to delete this property?')) return

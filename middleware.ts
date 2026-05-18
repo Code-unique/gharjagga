@@ -1,31 +1,23 @@
 import { clerkMiddleware, createRouteMatcher } from '@clerk/nextjs/server'
 
-// Define protected routes
+// Protected routes - require sign in
 const isProtectedRoute = createRouteMatcher([
   '/dashboard(.*)',
   '/admin(.*)',
 ])
 
-// Define public routes that should bypass protection
-const isPublicRoute = createRouteMatcher([
-  '/',
-  '/properties(.*)',
-  '/api/properties(.*)',
-  '/api/webhooks(.*)',
+// API routes that require authentication
+const isProtectedApiRoute = createRouteMatcher([
+  '/api/properties/create',
+  '/api/properties/update',
+  '/api/properties/delete',
+  '/api/admin(.*)',
+  '/api/dashboard(.*)',
   '/api/upload(.*)',
-  '/sign-in(.*)',
-  '/sign-up(.*)',
-  '/about',
-  '/contact',
 ])
 
 export default clerkMiddleware(async (auth, req) => {
-  // Skip middleware for public routes
-  if (isPublicRoute(req)) {
-    return
-  }
-  
-  // Protect dashboard and admin routes
+  // Protect page routes
   if (isProtectedRoute(req)) {
     await auth.protect()
   }

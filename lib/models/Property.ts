@@ -42,6 +42,11 @@ export interface IProperty extends Document {
     email: string;
     photo?: string;
   };
+  owner: {
+    clerkId: string;  // ✅ NEW: Track who created the property
+    email: string;
+    name: string;
+  };
   featured: boolean;
   views: number;
   listedDate: Date;
@@ -100,9 +105,15 @@ const PropertySchema = new Schema<IProperty>({
   }],
   agent: {
     name: { type: String, default: 'Nepal Real Estate' },
-    phone: { type: String, default: '01-4XXXXXX' },
-    email: { type: String, default: 'info@nepalrealestate.com' },
+    phone: { type: String, default: '' },
+    email: { type: String, default: '' },
     photo: String
+  },
+  // ✅ NEW: Owner tracking
+  owner: {
+    clerkId: { type: String, required: true },
+    email: { type: String, required: true },
+    name: { type: String, required: true }
   },
   featured: { type: Boolean, default: false },
   views: { type: Number, default: 0 },
@@ -112,11 +123,11 @@ const PropertySchema = new Schema<IProperty>({
   timestamps: true
 });
 
-// Index for better search performance
+// Indexes
+PropertySchema.index({ 'owner.clerkId': 1 });
 PropertySchema.index({ 'location.province': 1, 'location.district': 1, 'location.city': 1 });
 PropertySchema.index({ type: 1, status: 1 });
 PropertySchema.index({ price: 1 });
-PropertySchema.index({ featured: 1 });
-PropertySchema.index({ createdAt: -1 });
+PropertySchema.index({ featured: 1, createdAt: -1 });
 
 export const Property = (mongoose.models.Property || mongoose.model<IProperty>('Property', PropertySchema)) as Model<IProperty>;

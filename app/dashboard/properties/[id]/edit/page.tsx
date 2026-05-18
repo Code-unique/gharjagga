@@ -9,6 +9,7 @@ import { z } from 'zod'
 import toast from 'react-hot-toast'
 import ImageUpload from '@/components/ui/ImageUpload'
 import { useParams } from 'next/navigation'
+import Link from 'next/link'
 
 const propertySchema = z.object({
   title: z.string().min(3, 'Title must be at least 3 characters'),
@@ -27,6 +28,9 @@ const propertySchema = z.object({
   ward: z.string().optional(),
   tole: z.string().optional(),
   features: z.string().optional(),
+  nearbySchools: z.string().optional(),
+  nearbyHospitals: z.string().optional(),
+  nearbyMarkets: z.string().optional(),
 })
 
 type PropertyFormData = z.infer<typeof propertySchema>
@@ -39,6 +43,9 @@ export default function EditPropertyPage() {
   const [loading, setLoading] = useState(true)
   const [images, setImages] = useState<Array<{ url: string; publicId: string }>>([])
   const [deleting, setDeleting] = useState(false)
+  const [isOwner, setIsOwner] = useState(false)
+  const [isAdmin, setIsAdmin] = useState(false)
+  const [property, setProperty] = useState<any>(null)
 
   const {
     register,
@@ -54,42 +61,68 @@ export default function EditPropertyPage() {
       router.push('/sign-in')
       return
     }
-    if (params?.id) {
-      fetchProperty()
+    if (isLoaded && isSignedIn && params?.id) {
+      checkPermissions()
     }
   }, [isLoaded, isSignedIn, params?.id])
 
-  const fetchProperty = async () => {
+  // ✅ Check if user has permission to edit this property
+  const checkPermissions = async () => {
     try {
+      // First, fetch the property
       const res = await fetch(`/api/properties/${params.id}`)
-      if (!res.ok) throw new Error('Property not found')
+      if (!res.ok) {
+        throw new Error('Property not found')
+      }
       
-      const property = await res.json()
-      
-      // Populate form
+      const propertyData = await res.json()
+      setProperty(propertyData)
+
+      // Check if current user is the owner
+      const isPropertyOwner = propertyData.owner?.clerkId === user?.id
+      setIsOwner(isPropertyOwner)
+
+      // Check if user is admin
+      const userRes = await fetch('/api/user/sync', { method: 'POST' })
+      if (userRes.ok) {
+        const userData = await userRes.json()
+        setIsAdmin(userData.user?.role === 'admin')
+      }
+
+      // If neither owner nor admin, deny access
+      if (!isPropertyOwner && !isAdmin) {
+        toast.error('You do not have permission to edit this property')
+        router.push('/dashboard')
+        return
+      }
+
+      // Populate form with property data
       reset({
-        title: property.title,
-        description: property.description,
-        type: property.type,
-        status: property.status,
-        price: property.price?.toString(),
-        area: property.area?.toString(),
-        areaUnit: property.areaUnit || 'sqft',
-        bedrooms: property.bedrooms?.toString() || '0',
-        bathrooms: property.bathrooms?.toString() || '0',
-        floors: property.floors?.toString() || '0',
-        province: property.location?.province || '',
-        district: property.location?.district || '',
-        city: property.location?.city || '',
-        ward: property.location?.ward?.toString() || '',
-        tole: property.location?.tole || '',
-        features: property.features?.join(', ') || '',
+        title: propertyData.title || '',
+        description: propertyData.description || '',
+        type: propertyData.type || 'house',
+        status: propertyData.status || 'for-sale',
+        price: propertyData.price?.toString() || '',
+        area: propertyData.area?.toString() || '',
+        areaUnit: propertyData.areaUnit || 'sqft',
+        bedrooms: propertyData.bedrooms?.toString() || '0',
+        bathrooms: propertyData.bathrooms?.toString() || '0',
+        floors: propertyData.floors?.toString() || '0',
+        province: propertyData.location?.province || '',
+        district: propertyData.location?.district || '',
+        city: propertyData.location?.city || '',
+        ward: propertyData.location?.ward?.toString() || '',
+        tole: propertyData.location?.tole || '',
+        features: propertyData.features?.join(', ') || '',
+        nearbySchools: propertyData.nearby?.find((n: any) => n.type === 'school')?.name || '',
+        nearbyHospitals: propertyData.nearby?.find((n: any) => n.type === 'hospital')?.name || '',
+        nearbyMarkets: propertyData.nearby?.find((n: any) => n.type === 'market')?.name || '',
       })
       
-      setImages(property.images || [])
-    } catch (error) {
-      console.error('Error fetching property:', error)
-      toast.error('Failed to load property')
+      setImages(propertyData.images || [])
+    } catch (error: any) {
+      console.error('Error:', error)
+      toast.error(error.message || 'Failed to load property')
       router.push('/dashboard')
     } finally {
       setLoading(false)
@@ -102,6 +135,12 @@ export default function EditPropertyPage() {
       return
     }
 
+    // ✅ Double-check permission before submitting
+    if (!isOwner && !isAdmin) {
+      toast.error('You do not have permission to edit this property')
+      return
+    }
+
     setIsSubmitting(true)
     
     try {
@@ -109,9 +148,21 @@ export default function EditPropertyPage() {
         ? data.features.split(',').map(f => f.trim()).filter(Boolean)
         : []
 
+      // Build nearby places array
+      const nearby = []
+      if (data.nearbySchools) {
+        nearby.push({ name: data.nearbySchools, distance: 'Nearby', type: 'school' })
+      }
+      if (data.nearbyHospitals) {
+        nearby.push({ name: data.nearbyHospitals, distance: 'Nearby', type: 'hospital' })
+      }
+      if (data.nearbyMarkets) {
+        nearby.push({ name: data.nearbyMarkets, distance: 'Nearby', type: 'market' })
+      }
+
       const propertyData = {
-        title: data.title,
-        description: data.description,
+        title: data.title.trim(),
+        description: data.description.trim(),
         type: data.type,
         status: data.status,
         price: parseInt(data.price),
@@ -125,10 +176,11 @@ export default function EditPropertyPage() {
           district: data.district,
           city: data.city,
           ward: data.ward ? parseInt(data.ward) : undefined,
-          tole: data.tole || undefined,
+          tole: data.tole?.trim() || undefined,
         },
         features,
         images,
+        nearby,
       }
 
       const res = await fetch(`/api/properties/${params.id}`, {
@@ -140,6 +192,11 @@ export default function EditPropertyPage() {
       const responseData = await res.json()
 
       if (!res.ok) {
+        if (res.status === 403) {
+          toast.error('You do not have permission to edit this property')
+          router.push('/dashboard')
+          return
+        }
         throw new Error(responseData.error || 'Failed to update property')
       }
       
@@ -155,7 +212,17 @@ export default function EditPropertyPage() {
   }
 
   const handleDelete = async () => {
-    if (!confirm('Are you sure you want to delete this property? This action cannot be undone.')) {
+    // ✅ Check permission before showing delete dialog
+    if (!isOwner && !isAdmin) {
+      toast.error('You do not have permission to delete this property')
+      return
+    }
+
+    const confirmMessage = isAdmin && !isOwner
+      ? '⚠️ Admin Delete: Are you sure you want to delete this property? This action cannot be undone.'
+      : 'Are you sure you want to delete this property? This action cannot be undone.'
+
+    if (!confirm(confirmMessage)) {
       return
     }
 
@@ -165,44 +232,128 @@ export default function EditPropertyPage() {
         method: 'DELETE',
       })
 
-      if (!res.ok) throw new Error('Failed to delete')
+      const responseData = await res.json()
+
+      if (!res.ok) {
+        if (res.status === 403) {
+          toast.error('You do not have permission to delete this property')
+          return
+        }
+        throw new Error(responseData.error || 'Failed to delete property')
+      }
       
       toast.success('Property deleted successfully')
       router.push('/dashboard')
       router.refresh()
-    } catch (error) {
-      toast.error('Failed to delete property')
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to delete property')
     } finally {
       setDeleting(false)
     }
   }
 
+  // Loading state
   if (!isLoaded || loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500 mx-auto mb-4"></div>
+          <p className="text-gray-600">Loading property...</p>
+        </div>
       </div>
     )
   }
 
-  if (!isSignedIn) return null
+  // Not signed in
+  if (!isSignedIn) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="text-center">
+          <p className="text-gray-600 mb-4">Please sign in to edit properties</p>
+          <Link href="/sign-in" className="btn-primary">Sign In</Link>
+        </div>
+      </div>
+    )
+  }
+
+  // No permission
+  if (!isOwner && !isAdmin) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="text-center max-w-md">
+          <div className="text-6xl mb-4">🔒</div>
+          <h1 className="text-2xl font-bold text-gray-900 mb-2">Access Denied</h1>
+          <p className="text-gray-600 mb-6">
+            You do not have permission to edit this property. Only the property owner or an admin can make changes.
+          </p>
+          <div className="space-y-3">
+            <Link href="/dashboard" className="btn-primary block text-center">
+              Go to Dashboard
+            </Link>
+            <button
+              onClick={() => router.back()}
+              className="btn-secondary block w-full text-center"
+            >
+              Go Back
+            </button>
+          </div>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="min-h-screen bg-gray-50 pt-24 pb-12">
       <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex justify-between items-center mb-8">
+        {/* Header */}
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-8 gap-4">
           <div>
-            <h1 className="text-3xl font-bold text-gray-900">Edit Property</h1>
-            <p className="text-gray-600 mt-2">Update your property details</p>
+            <div className="flex items-center gap-3 mb-2">
+              <h1 className="text-3xl font-bold text-gray-900">Edit Property</h1>
+              {isAdmin && !isOwner && (
+                <span className="px-3 py-1 bg-purple-100 text-purple-800 text-xs rounded-full font-medium">
+                  Admin Edit
+                </span>
+              )}
+            </div>
+            <p className="text-gray-600">
+              {isAdmin && !isOwner 
+                ? `Editing property owned by ${property?.owner?.name || 'Unknown'}`
+                : 'Update your property details'
+              }
+            </p>
           </div>
-          <button
-            onClick={handleDelete}
-            disabled={deleting}
-            className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50 text-sm font-medium"
-          >
-            {deleting ? 'Deleting...' : 'Delete Property'}
-          </button>
+          
+          {/* Property Info Badge */}
+          <div className="flex items-center gap-3">
+            <Link
+              href={`/properties/${params.id}`}
+              target="_blank"
+              className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 text-sm font-medium"
+            >
+              View Property
+            </Link>
+            <button
+              onClick={handleDelete}
+              disabled={deleting}
+              className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50 text-sm font-medium"
+            >
+              {deleting ? 'Deleting...' : 'Delete'}
+            </button>
+          </div>
         </div>
+
+        {/* Property Owner Info */}
+        {property?.owner && (
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
+            <div className="flex items-center gap-2">
+              <span className="text-blue-600">ℹ️</span>
+              <p className="text-sm text-blue-800">
+                <strong>Owner:</strong> {property.owner.name} ({property.owner.email})
+              </p>
+            </div>
+          </div>
+        )}
         
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
           {/* Image Upload */}
@@ -210,6 +361,7 @@ export default function EditPropertyPage() {
             <div className="flex items-center space-x-2 pb-4 border-b border-gray-100 mb-4">
               <span className="text-xl">📸</span>
               <h2 className="text-lg font-semibold text-gray-900">Property Images</h2>
+              <span className="text-sm text-gray-500">({images.length}/5)</span>
             </div>
             <ImageUpload value={images} onChange={setImages} maxFiles={5} />
           </div>
@@ -222,14 +374,27 @@ export default function EditPropertyPage() {
             </div>
             
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Title *</label>
-              <input {...register('title')} className="input" />
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Property Title <span className="text-red-500">*</span>
+              </label>
+              <input 
+                {...register('title')} 
+                className="input"
+                placeholder="e.g., Luxury Villa in Kathmandu" 
+              />
               {errors.title && <p className="mt-1 text-sm text-red-600">{errors.title.message}</p>}
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Description *</label>
-              <textarea {...register('description')} rows={5} className="input resize-none" />
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Description <span className="text-red-500">*</span>
+              </label>
+              <textarea 
+                {...register('description')} 
+                rows={5} 
+                className="input resize-none"
+                placeholder="Describe the property in detail..."
+              />
               {errors.description && <p className="mt-1 text-sm text-red-600">{errors.description.message}</p>}
             </div>
 
@@ -237,20 +402,20 @@ export default function EditPropertyPage() {
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Type *</label>
                 <select {...register('type')} className="select">
-                  <option value="house">House</option>
-                  <option value="apartment">Apartment</option>
-                  <option value="land">Land</option>
-                  <option value="commercial">Commercial</option>
-                  <option value="villa">Villa</option>
+                  <option value="house">🏘️ House</option>
+                  <option value="apartment">🏢 Apartment</option>
+                  <option value="land">🌍 Land</option>
+                  <option value="commercial">🏪 Commercial</option>
+                  <option value="villa">🏰 Villa</option>
                 </select>
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Status *</label>
                 <select {...register('status')} className="select">
-                  <option value="for-sale">For Sale</option>
-                  <option value="for-rent">For Rent</option>
-                  <option value="sold">Sold</option>
-                  <option value="rented">Rented</option>
+                  <option value="for-sale">💰 For Sale</option>
+                  <option value="for-rent">📋 For Rent</option>
+                  <option value="sold">✅ Sold</option>
+                  <option value="rented">🔒 Rented</option>
                 </select>
               </div>
             </div>
@@ -258,12 +423,12 @@ export default function EditPropertyPage() {
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Price (NPR) *</label>
-                <input {...register('price')} type="number" className="input" />
+                <input {...register('price')} type="number" className="input" placeholder="5000000" />
                 {errors.price && <p className="mt-1 text-sm text-red-600">{errors.price.message}</p>}
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Area *</label>
-                <input {...register('area')} type="number" className="input" />
+                <input {...register('area')} type="number" className="input" placeholder="2500" />
                 {errors.area && <p className="mt-1 text-sm text-red-600">{errors.area.message}</p>}
               </div>
               <div>
@@ -273,6 +438,8 @@ export default function EditPropertyPage() {
                   <option value="aana">Aana</option>
                   <option value="dhur">Dhur</option>
                   <option value="ropani">Ropani</option>
+                  <option value="bigha">Bigha</option>
+                  <option value="kattha">Kattha</option>
                 </select>
               </div>
             </div>
@@ -280,15 +447,15 @@ export default function EditPropertyPage() {
             <div className="grid grid-cols-3 gap-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Bedrooms</label>
-                <input {...register('bedrooms')} type="number" className="input" />
+                <input {...register('bedrooms')} type="number" className="input" placeholder="3" />
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Bathrooms</label>
-                <input {...register('bathrooms')} type="number" className="input" />
+                <input {...register('bathrooms')} type="number" className="input" placeholder="2" />
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Floors</label>
-                <input {...register('floors')} type="number" className="input" />
+                <input {...register('floors')} type="number" className="input" placeholder="2" />
               </div>
             </div>
           </div>
@@ -304,7 +471,7 @@ export default function EditPropertyPage() {
               <label className="block text-sm font-medium text-gray-700 mb-1">Province *</label>
               <select {...register('province')} className="select">
                 <option value="">Select Province</option>
-                <option value="Province 1">Province 1</option>
+                <option value="Province 1">Province 1 (Koshi)</option>
                 <option value="Madhesh Province">Madhesh Province</option>
                 <option value="Bagmati Province">Bagmati Province</option>
                 <option value="Gandaki Province">Gandaki Province</option>
@@ -318,24 +485,24 @@ export default function EditPropertyPage() {
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">District *</label>
-                <input {...register('district')} className="input" />
+                <input {...register('district')} className="input" placeholder="Kathmandu" />
                 {errors.district && <p className="mt-1 text-sm text-red-600">{errors.district.message}</p>}
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">City *</label>
-                <input {...register('city')} className="input" />
+                <input {...register('city')} className="input" placeholder="Kathmandu" />
                 {errors.city && <p className="mt-1 text-sm text-red-600">{errors.city.message}</p>}
               </div>
             </div>
 
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Ward</label>
-                <input {...register('ward')} type="number" className="input" />
+                <label className="block text-sm font-medium text-gray-700 mb-1">Ward Number</label>
+                <input {...register('ward')} type="number" className="input" placeholder="4" />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Tole</label>
-                <input {...register('tole')} className="input" />
+                <label className="block text-sm font-medium text-gray-700 mb-1">Tole/Area</label>
+                <input {...register('tole')} className="input" placeholder="Lazimpat" />
               </div>
             </div>
           </div>
@@ -344,24 +511,51 @@ export default function EditPropertyPage() {
           <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 space-y-4">
             <div className="flex items-center space-x-2 pb-4 border-b border-gray-100">
               <span className="text-xl">✨</span>
-              <h2 className="text-lg font-semibold text-gray-900">Features</h2>
+              <h2 className="text-lg font-semibold text-gray-900">Features & Amenities</h2>
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
                 Features (comma-separated)
               </label>
-              <input {...register('features')} className="input" placeholder="Mountain View, Parking, Garden" />
+              <input 
+                {...register('features')} 
+                className="input" 
+                placeholder="Mountain View, Parking, Garden, Security, Internet" 
+              />
+              <p className="text-xs text-gray-500 mt-1">Separate each feature with a comma</p>
+            </div>
+          </div>
+
+          {/* Nearby Places */}
+          <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 space-y-4">
+            <div className="flex items-center space-x-2 pb-4 border-b border-gray-100">
+              <span className="text-xl">🗺️</span>
+              <h2 className="text-lg font-semibold text-gray-900">Nearby Places</h2>
+            </div>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Nearby School</label>
+                <input {...register('nearbySchools')} className="input" placeholder="St. Xavier's School" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Nearby Hospital</label>
+                <input {...register('nearbyHospitals')} className="input" placeholder="Bir Hospital" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Nearby Market</label>
+                <input {...register('nearbyMarkets')} className="input" placeholder="Durbar Marg" />
+              </div>
             </div>
           </div>
 
           {/* Submit Buttons */}
-          <div className="flex justify-between">
+          <div className="flex flex-col sm:flex-row justify-between gap-4 pt-4">
             <button
               type="button"
               onClick={handleDelete}
-              className="px-6 py-3 border border-red-300 text-red-700 rounded-lg hover:bg-red-50 font-medium"
+              className="px-6 py-3 border border-red-300 text-red-700 rounded-lg hover:bg-red-50 font-medium text-center"
             >
-              Delete Property
+              🗑️ Delete Property
             </button>
             <div className="flex gap-4">
               <button
@@ -374,9 +568,16 @@ export default function EditPropertyPage() {
               <button
                 type="submit"
                 disabled={isSubmitting}
-                className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium disabled:opacity-50"
+                className="px-8 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium disabled:opacity-50 flex items-center gap-2"
               >
-                {isSubmitting ? 'Saving...' : 'Save Changes'}
+                {isSubmitting ? (
+                  <>
+                    <div className="animate-spin rounded-full h-4 w-4 border-t-2 border-b-2 border-white"></div>
+                    Saving...
+                  </>
+                ) : (
+                  '💾 Save Changes'
+                )}
               </button>
             </div>
           </div>

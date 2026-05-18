@@ -1,10 +1,24 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { connectDB } from '@/lib/db';
 import { Property } from '@/lib/models/Property';
+import { User } from '@/lib/models/User';
 import { auth } from '@clerk/nextjs/server';
 import cloudinary from '@/lib/cloudinary';
 
-// GET single property
+// Helper function to check if user can modify property
+async function canModifyProperty(propertyId: string, userId: string): Promise<boolean> {
+  await connectDB();
+  
+  // Check if user is admin
+  const user = await User.findOne({ clerkId: userId }).select('role').lean();
+  if (user?.role === 'admin') return true;
+  
+  // Check if user is the owner
+  const property = await Property.findById(propertyId).select('owner').lean();
+  return property?.owner?.clerkId === userId;
+}
+
+// GET - Public (increments views)
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -30,7 +44,7 @@ export async function GET(
   }
 }
 
-// PUT - Update property
+// PUT - Update property (owner or admin only)
 export async function PUT(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -38,14 +52,24 @@ export async function PUT(
   try {
     const { userId } = await auth();
     if (!userId) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+      return NextResponse.json({ error: 'Unauthorized - Please sign in' }, { status: 401 });
+    }
+    
+    const { id } = await params;
+    
+    // ✅ Check ownership
+    const hasPermission = await canModifyProperty(id, userId);
+    if (!hasPermission) {
+      return NextResponse.json(
+        { error: 'You do not have permission to edit this property' }, 
+        { status: 403 }
+      );
     }
     
     await connectDB();
-    const { id } = await params;
     const body = await request.json();
     
-    // Find existing property to compare images
+    // Find existing property to handle image deletion
     const existingProperty = await Property.findById(id);
     if (!existingProperty) {
       return NextResponse.json({ error: 'Property not found' }, { status: 404 });
@@ -55,22 +79,21 @@ export async function PUT(
     if (body.images && existingProperty.images) {
       const newImagePublicIds = body.images.map((img: any) => img.publicId);
       const imagesToDelete = existingProperty.images.filter(
-        (img: any) => !newImagePublicIds.includes(img.publicId)
+        (img: any) => !newImagePublicIds.includes(img.publicId) && img.publicId !== 'placeholder'
       );
       
-      // Delete from Cloudinary
       for (const img of imagesToDelete) {
-        if (img.publicId && img.publicId !== 'placeholder') {
-          try {
-            await cloudinary.uploader.destroy(img.publicId);
-          } catch (err) {
-            console.error('Failed to delete image:', img.publicId, err);
-          }
+        try {
+          await cloudinary.uploader.destroy(img.publicId);
+        } catch (err) {
+          console.error('Failed to delete image:', img.publicId, err);
         }
       }
     }
     
-    // Update property
+    // Don't allow changing owner through API
+    delete body.owner;
+    
     const updatedProperty = await Property.findByIdAndUpdate(
       id,
       { ...body, updatedAt: new Date() },
@@ -88,7 +111,7 @@ export async function PUT(
   }
 }
 
-// DELETE - Soft delete
+// DELETE - Delete property (owner or admin only)
 export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -96,12 +119,23 @@ export async function DELETE(
   try {
     const { userId } = await auth();
     if (!userId) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+      return NextResponse.json({ error: 'Unauthorized - Please sign in' }, { status: 401 });
+    }
+    
+    const { id } = await params;
+    
+    // ✅ Check ownership
+    const hasPermission = await canModifyProperty(id, userId);
+    if (!hasPermission) {
+      return NextResponse.json(
+        { error: 'You do not have permission to delete this property' }, 
+        { status: 403 }
+      );
     }
     
     await connectDB();
-    const { id } = await params;
     
+    // Soft delete - mark as inactive
     const property = await Property.findByIdAndUpdate(
       id,
       { isActive: false, status: 'sold' },
@@ -112,7 +146,10 @@ export async function DELETE(
       return NextResponse.json({ error: 'Property not found' }, { status: 404 });
     }
     
-    return NextResponse.json({ success: true, message: 'Property deleted successfully' });
+    return NextResponse.json({ 
+      success: true, 
+      message: 'Property deleted successfully' 
+    });
   } catch (error) {
     console.error('Error deleting property:', error);
     return NextResponse.json({ error: 'Failed to delete property' }, { status: 500 });

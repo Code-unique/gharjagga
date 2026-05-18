@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { connectDB } from '@/lib/db';
 import { Property } from '@/lib/models/Property';
-import { auth } from '@clerk/nextjs/server';
+import { auth, currentUser } from '@clerk/nextjs/server';
 
-// GET - Public route, anyone can fetch properties
+// GET - Public route, anyone can fetch active properties
 export async function GET(request: NextRequest) {
   try {
     await connectDB();
@@ -11,25 +11,13 @@ export async function GET(request: NextRequest) {
     
     const query: any = { isActive: true };
     
-    // Build query based on search params
-    if (searchParams.get('type')) {
-      query.type = searchParams.get('type');
-    }
-    if (searchParams.get('status')) {
-      query.status = searchParams.get('status');
-    }
-    if (searchParams.get('province')) {
-      query['location.province'] = searchParams.get('province');
-    }
-    if (searchParams.get('district')) {
-      query['location.district'] = searchParams.get('district');
-    }
-    if (searchParams.get('city')) {
-      query['location.city'] = searchParams.get('city');
-    }
-    if (searchParams.get('featured') === 'true') {
-      query.featured = true;
-    }
+    // Only show active properties to public
+    if (searchParams.get('type')) query.type = searchParams.get('type');
+    if (searchParams.get('status')) query.status = searchParams.get('status');
+    if (searchParams.get('province')) query['location.province'] = searchParams.get('province');
+    if (searchParams.get('district')) query['location.district'] = searchParams.get('district');
+    if (searchParams.get('city')) query['location.city'] = searchParams.get('city');
+    if (searchParams.get('featured') === 'true') query.featured = true;
     
     // Price range
     const minPrice = searchParams.get('minPrice');
@@ -40,12 +28,12 @@ export async function GET(request: NextRequest) {
       if (maxPrice) query.price.$lte = parseInt(maxPrice);
     }
     
-    // Bedrooms filter
+    // Bedrooms
     if (searchParams.get('bedrooms')) {
       query.bedrooms = { $gte: parseInt(searchParams.get('bedrooms')!) };
     }
     
-    // Search text
+    // Search
     const search = searchParams.get('search');
     if (search) {
       query.$or = [
@@ -57,7 +45,12 @@ export async function GET(request: NextRequest) {
       ];
     }
     
-    // Sort options
+    // Owner filter - for dashboard
+    const ownerId = searchParams.get('ownerId');
+    if (ownerId) {
+      query['owner.clerkId'] = ownerId;
+    }
+    
     const sortOption = searchParams.get('sort') || '-createdAt';
     const sortMap: any = {
       'newest': { createdAt: -1 },
@@ -68,7 +61,6 @@ export async function GET(request: NextRequest) {
     };
     const sort = sortMap[sortOption] || { createdAt: -1 };
     
-    // Pagination
     const page = parseInt(searchParams.get('page') || '1');
     const limit = parseInt(searchParams.get('limit') || '12');
     const skip = (page - 1) * limit;
@@ -96,25 +88,29 @@ export async function GET(request: NextRequest) {
   } catch (error) {
     console.error('Error fetching properties:', error);
     return NextResponse.json(
-      { 
-        success: false,
-        properties: [], 
-        pagination: { total: 0, page: 1, pages: 0, hasMore: false } 
-      },
+      { success: false, properties: [], pagination: { total: 0, page: 1, pages: 0, hasMore: false } },
       { status: 200 }
     );
   }
 }
 
-// POST - Protected route, requires authentication
+// POST - Create property (authenticated users only)
 export async function POST(request: NextRequest) {
   try {
-    // Get auth session
     const { userId } = await auth();
     
     if (!userId) {
       return NextResponse.json(
-        { success: false, error: 'Unauthorized - Please sign in to create properties' }, 
+        { success: false, error: 'Please sign in to create properties' }, 
+        { status: 401 }
+      );
+    }
+
+    // Get user info from Clerk
+    const clerkUser = await currentUser();
+    if (!clerkUser) {
+      return NextResponse.json(
+        { success: false, error: 'User not found' }, 
         { status: 401 }
       );
     }
@@ -125,12 +121,12 @@ export async function POST(request: NextRequest) {
     // Validate required fields
     if (!body.title || !body.description || !body.price || !body.area) {
       return NextResponse.json(
-        { success: false, error: 'Missing required fields: title, description, price, area' }, 
+        { success: false, error: 'Missing required fields' }, 
         { status: 400 }
       );
     }
 
-    // Create property
+    // Create property with owner info
     const property = await Property.create({
       title: body.title,
       description: body.description,
@@ -146,19 +142,25 @@ export async function POST(request: NextRequest) {
         province: body.province || body.location?.province || 'Bagmati Province',
         district: body.district || body.location?.district || 'Kathmandu',
         city: body.city || body.location?.city || 'Kathmandu',
-        ward: body.ward ? parseInt(body.ward) : body.location?.ward || undefined,
-        tole: body.tole || body.location?.tole || undefined,
+        ward: body.ward ? parseInt(body.ward) : undefined,
+        tole: body.tole || undefined,
       },
       features: body.features || [],
-      images: body.images || [{ url: '/placeholder.jpg', publicId: 'placeholder' }],
+      images: body.images || [{ url: '/placeholder.svg', publicId: 'placeholder' }],
       amenities: body.amenities || [],
       nearby: body.nearby || [],
       agent: {
-        name: body.agent?.name || 'Nepal Real Estate',
-        phone: body.agent?.phone || '01-4XXXXXX',
-        email: body.agent?.email || 'info@nepalrealestate.com',
+        name: body.agent?.name || clerkUser.fullName || 'Agent',
+        phone: body.agent?.phone || clerkUser.phoneNumbers?.[0]?.phoneNumber || '',
+        email: body.agent?.email || clerkUser.emailAddresses?.[0]?.emailAddress || '',
       },
-      featured: body.featured || false,
+      // ✅ Set owner
+      owner: {
+        clerkId: userId,
+        email: clerkUser.emailAddresses?.[0]?.emailAddress || '',
+        name: clerkUser.fullName || 'User',
+      },
+      featured: false,
       views: 0,
       listedDate: new Date(),
       isActive: true,
@@ -171,103 +173,7 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     console.error('Error creating property:', error);
     return NextResponse.json(
-      { success: false, error: 'Failed to create property. Please try again.' },
-      { status: 500 }
-    );
-  }
-}
-
-// PATCH - Update property (protected)
-export async function PATCH(request: NextRequest) {
-  try {
-    const { userId } = await auth();
-    
-    if (!userId) {
-      return NextResponse.json(
-        { success: false, error: 'Unauthorized' }, 
-        { status: 401 }
-      );
-    }
-
-    await connectDB();
-    const body = await request.json();
-    const { id, ...updateData } = body;
-
-    if (!id) {
-      return NextResponse.json(
-        { success: false, error: 'Property ID is required' }, 
-        { status: 400 }
-      );
-    }
-
-    const property = await Property.findByIdAndUpdate(
-      id,
-      updateData,
-      { new: true, runValidators: true }
-    );
-
-    if (!property) {
-      return NextResponse.json(
-        { success: false, error: 'Property not found' }, 
-        { status: 404 }
-      );
-    }
-
-    return NextResponse.json(
-      { success: true, message: 'Property updated successfully', property }
-    );
-  } catch (error) {
-    console.error('Error updating property:', error);
-    return NextResponse.json(
-      { success: false, error: 'Failed to update property' },
-      { status: 500 }
-    );
-  }
-}
-
-// DELETE - Soft delete property (protected)
-export async function DELETE(request: NextRequest) {
-  try {
-    const { userId } = await auth();
-    
-    if (!userId) {
-      return NextResponse.json(
-        { success: false, error: 'Unauthorized' }, 
-        { status: 401 }
-      );
-    }
-
-    await connectDB();
-    const { searchParams } = new URL(request.url);
-    const id = searchParams.get('id');
-
-    if (!id) {
-      return NextResponse.json(
-        { success: false, error: 'Property ID is required' }, 
-        { status: 400 }
-      );
-    }
-
-    const property = await Property.findByIdAndUpdate(
-      id,
-      { isActive: false },
-      { new: true }
-    );
-
-    if (!property) {
-      return NextResponse.json(
-        { success: false, error: 'Property not found' }, 
-        { status: 404 }
-      );
-    }
-
-    return NextResponse.json(
-      { success: true, message: 'Property deleted successfully' }
-    );
-  } catch (error) {
-    console.error('Error deleting property:', error);
-    return NextResponse.json(
-      { success: false, error: 'Failed to delete property' },
+      { success: false, error: 'Failed to create property' },
       { status: 500 }
     );
   }
