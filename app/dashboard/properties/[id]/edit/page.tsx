@@ -28,9 +28,6 @@ const propertySchema = z.object({
   ward: z.string().optional(),
   tole: z.string().optional(),
   features: z.string().optional(),
-  nearbySchools: z.string().optional(),
-  nearbyHospitals: z.string().optional(),
-  nearbyMarkets: z.string().optional(),
 })
 
 type PropertyFormData = z.infer<typeof propertySchema>
@@ -114,9 +111,6 @@ export default function EditPropertyPage() {
         ward: propertyData.location?.ward?.toString() || '',
         tole: propertyData.location?.tole || '',
         features: propertyData.features?.join(', ') || '',
-        nearbySchools: propertyData.nearby?.find((n: any) => n.type === 'school')?.name || '',
-        nearbyHospitals: propertyData.nearby?.find((n: any) => n.type === 'hospital')?.name || '',
-        nearbyMarkets: propertyData.nearby?.find((n: any) => n.type === 'market')?.name || '',
       })
       
       setImages(propertyData.images || [])
@@ -148,18 +142,6 @@ export default function EditPropertyPage() {
         ? data.features.split(',').map(f => f.trim()).filter(Boolean)
         : []
 
-      // Build nearby places array
-      const nearby = []
-      if (data.nearbySchools) {
-        nearby.push({ name: data.nearbySchools, distance: 'Nearby', type: 'school' })
-      }
-      if (data.nearbyHospitals) {
-        nearby.push({ name: data.nearbyHospitals, distance: 'Nearby', type: 'hospital' })
-      }
-      if (data.nearbyMarkets) {
-        nearby.push({ name: data.nearbyMarkets, distance: 'Nearby', type: 'market' })
-      }
-
       const propertyData = {
         title: data.title.trim(),
         description: data.description.trim(),
@@ -180,7 +162,6 @@ export default function EditPropertyPage() {
         },
         features,
         images,
-        nearby,
       }
 
       const res = await fetch(`/api/properties/${params.id}`, {
@@ -523,28 +504,6 @@ export default function EditPropertyPage() {
                 placeholder="Mountain View, Parking, Garden, Security, Internet" 
               />
               <p className="text-xs text-gray-500 mt-1">Separate each feature with a comma</p>
-            </div>
-          </div>
-
-          {/* Nearby Places */}
-          <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 space-y-4">
-            <div className="flex items-center space-x-2 pb-4 border-b border-gray-100">
-              <span className="text-xl">🗺️</span>
-              <h2 className="text-lg font-semibold text-gray-900">Nearby Places</h2>
-            </div>
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Nearby School</label>
-                <input {...register('nearbySchools')} className="input" placeholder="St. Xavier's School" />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Nearby Hospital</label>
-                <input {...register('nearbyHospitals')} className="input" placeholder="Bir Hospital" />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Nearby Market</label>
-                <input {...register('nearbyMarkets')} className="input" placeholder="Durbar Marg" />
-              </div>
             </div>
           </div>
 

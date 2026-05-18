@@ -26,9 +26,6 @@ const propertySchema = z.object({
   ward: z.string().optional(),
   tole: z.string().optional(),
   features: z.string().optional(),
-  nearbySchools: z.string().optional(),
-  nearbyHospitals: z.string().optional(),
-  nearbyMarkets: z.string().optional(),
 })
 
 type PropertyFormData = z.infer<typeof propertySchema>
@@ -65,46 +62,32 @@ export default function NewPropertyPage() {
     }
 
     setIsSubmitting(true)
-    
+
     try {
-      // Parse features
-      const features = data.features 
+      const features = data.features
         ? data.features.split(',').map(f => f.trim()).filter(Boolean)
         : []
 
-      // Parse nearby places
-      const nearby = []
-      if (data.nearbySchools) {
-        nearby.push({ name: data.nearbySchools, distance: 'Nearby', type: 'school' })
-      }
-      if (data.nearbyHospitals) {
-        nearby.push({ name: data.nearbyHospitals, distance: 'Nearby', type: 'hospital' })
-      }
-      if (data.nearbyMarkets) {
-        nearby.push({ name: data.nearbyMarkets, distance: 'Nearby', type: 'market' })
-      }
-
       const propertyData = {
-        title: data.title,
-        description: data.description,
+        title: data.title.trim(),
+        description: data.description.trim(),
         type: data.type,
         status: data.status,
-        price: data.price,
-        area: data.area,
+        price: parseInt(data.price),
+        area: parseInt(data.area),
         areaUnit: data.areaUnit,
-        bedrooms: data.bedrooms || '0',
-        bathrooms: data.bathrooms || '0',
-        floors: data.floors || '0',
+        bedrooms: parseInt(data.bedrooms || '0'),
+        bathrooms: parseInt(data.bathrooms || '0'),
+        floors: parseInt(data.floors || '0'),
         location: {
           province: data.province,
           district: data.district,
           city: data.city,
-          ward: data.ward || undefined,
-          tole: data.tole || undefined,
+          ward: data.ward ? parseInt(data.ward) : undefined,
+          tole: data.tole?.trim() || undefined,
         },
         features,
         images,
-        nearby,
       }
 
       const res = await fetch('/api/properties', {
@@ -118,7 +101,7 @@ export default function NewPropertyPage() {
       if (!res.ok) {
         throw new Error(responseData.error || 'Failed to create property')
       }
-      
+
       toast.success('Property created successfully!')
       router.push('/dashboard')
       router.refresh()
@@ -141,7 +124,10 @@ export default function NewPropertyPage() {
   if (!isSignedIn) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <p className="text-gray-600">Redirecting to sign in...</p>
+        <div className="text-center">
+          <p className="text-gray-600 mb-4">Please sign in to add properties</p>
+          <a href="/sign-in" className="btn-primary">Sign In</a>
+        </div>
       </div>
     )
   }
@@ -149,23 +135,21 @@ export default function NewPropertyPage() {
   return (
     <div className="min-h-screen bg-gray-50 pt-24 pb-12">
       <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
+        {/* Header */}
         <div className="mb-8">
           <h1 className="text-3xl font-bold text-gray-900">Add New Property</h1>
           <p className="text-gray-600 mt-2">Fill in the details below to list your property</p>
         </div>
-        
+
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
-          {/* Image Upload Section */}
+          {/* Image Upload */}
           <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
             <div className="flex items-center space-x-2 pb-4 border-b border-gray-100 mb-4">
               <span className="text-xl">📸</span>
               <h2 className="text-lg font-semibold text-gray-900">Property Images</h2>
+              <span className="text-sm text-gray-500">({images.length}/5)</span>
             </div>
-            <ImageUpload
-              value={images}
-              onChange={setImages}
-              maxFiles={5}
-            />
+            <ImageUpload value={images} onChange={setImages} maxFiles={5} />
           </div>
 
           {/* Basic Information */}
@@ -182,7 +166,7 @@ export default function NewPropertyPage() {
               <input 
                 {...register('title')} 
                 className="input"
-                placeholder="e.g., Luxury 4BHK Villa in Lazimpat, Kathmandu" 
+                placeholder="e.g., Luxury Villa in Kathmandu" 
               />
               {errors.title && <p className="mt-1 text-sm text-red-600">{errors.title.message}</p>}
             </div>
@@ -195,7 +179,7 @@ export default function NewPropertyPage() {
                 {...register('description')} 
                 rows={5} 
                 className="input resize-none"
-                placeholder="Describe the property in detail - include information about rooms, amenities, nearby facilities, construction quality, etc."
+                placeholder="Describe the property in detail..."
               />
               {errors.description && <p className="mt-1 text-sm text-red-600">{errors.description.message}</p>}
             </div>
@@ -297,7 +281,7 @@ export default function NewPropertyPage() {
 
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Ward</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Ward Number</label>
                 <input {...register('ward')} type="number" className="input" placeholder="4" />
               </div>
               <div>
@@ -313,56 +297,41 @@ export default function NewPropertyPage() {
               <span className="text-xl">✨</span>
               <h2 className="text-lg font-semibold text-gray-900">Features & Amenities</h2>
             </div>
-            
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
                 Features (comma-separated)
               </label>
               <input 
                 {...register('features')} 
-                className="input"
-                placeholder="Mountain View, Parking, Garden, Security, Internet, Water Supply" 
+                className="input" 
+                placeholder="Mountain View, Parking, Garden, Security, Internet" 
               />
               <p className="text-xs text-gray-500 mt-1">Separate each feature with a comma</p>
             </div>
           </div>
 
-          {/* Nearby Places */}
-          <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 space-y-4">
-            <div className="flex items-center space-x-2 pb-4 border-b border-gray-100">
-              <span className="text-xl">🗺️</span>
-              <h2 className="text-lg font-semibold text-gray-900">Nearby Places</h2>
-            </div>
-            
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Nearby School</label>
-              <input {...register('nearbySchools')} className="input" placeholder="St. Xavier's School" />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Nearby Hospital</label>
-              <input {...register('nearbyHospitals')} className="input" placeholder="Bir Hospital" />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Nearby Market</label>
-              <input {...register('nearbyMarkets')} className="input" placeholder="Durbar Marg" />
-            </div>
-          </div>
-
-          {/* Submit */}
-          <div className="flex justify-end gap-4">
+          {/* Submit Buttons */}
+          <div className="flex justify-end gap-4 pt-4">
             <button
               type="button"
               onClick={() => router.back()}
-              className="btn-secondary"
+              className="px-6 py-3 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 font-medium"
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={isSubmitting}
-              className="btn-primary"
+              className="px-8 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium disabled:opacity-50 flex items-center gap-2"
             >
-              {isSubmitting ? 'Creating...' : 'Create Property'}
+              {isSubmitting ? (
+                <>
+                  <div className="animate-spin rounded-full h-4 w-4 border-t-2 border-b-2 border-white"></div>
+                  Creating...
+                </>
+              ) : (
+                '✨ Create Property'
+              )}
             </button>
           </div>
         </form>
