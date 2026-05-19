@@ -18,7 +18,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    // ✅ Admin check
+    // Admin check
     const isAdmin = await requireAdmin(userId);
     if (!isAdmin) {
       return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
@@ -31,10 +31,19 @@ export async function GET(request: NextRequest) {
     const limit = parseInt(searchParams.get('limit') || '20');
     const status = searchParams.get('status');
     const search = searchParams.get('search');
+    const showDeleted = searchParams.get('showDeleted') === 'true';
 
+    // ✅ Build query - always exclude soft-deleted by default
     const query: any = {};
     
-    if (status && status !== 'all') query.status = status;
+    // Only show deleted if explicitly requested
+    if (!showDeleted) {
+      query.isActive = true; // ✅ Only show active properties
+    }
+    
+    if (status && status !== 'all') {
+      query.status = status;
+    }
     
     if (search) {
       query.$or = [
@@ -53,24 +62,46 @@ export async function GET(request: NextRequest) {
       Property.countDocuments(query)
     ]);
 
+    // Get stats separately (including deleted for counts)
+    const totalAll = await Property.countDocuments({});
+    const totalActive = await Property.countDocuments({ isActive: true });
+    const totalDeleted = await Property.countDocuments({ isActive: false });
+
     return NextResponse.json({
       properties,
-      pagination: { total, page, pages: Math.ceil(total / limit) }
+      stats: {
+        total: totalAll,
+        active: totalActive,
+        deleted: totalDeleted,
+      },
+      pagination: { 
+        total, 
+        page, 
+        pages: Math.ceil(total / limit) 
+      }
     });
   } catch (error) {
     console.error('Error:', error);
-    return NextResponse.json({ properties: [], pagination: { total: 0, page: 1, pages: 0 } });
+    return NextResponse.json({ 
+      properties: [], 
+      stats: { total: 0, active: 0, deleted: 0 },
+      pagination: { total: 0, page: 1, pages: 0 } 
+    });
   }
 }
 
 export async function PATCH(request: NextRequest) {
   try {
     const { userId } = await auth();
-    if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    if (!userId) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
 
-    // ✅ Admin check
+    // Admin check
     const isAdmin = await requireAdmin(userId);
-    if (!isAdmin) return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
+    if (!isAdmin) {
+      return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
+    }
 
     await connectDB();
     const { propertyIds, action } = await request.json();
@@ -80,17 +111,43 @@ export async function PATCH(request: NextRequest) {
     }
 
     let updateData = {};
+    let successMessage = '';
+
     switch (action) {
-      case 'delete': updateData = { isActive: false }; break;
-      case 'feature': updateData = { featured: true }; break;
-      case 'unfeature': updateData = { featured: false }; break;
-      default: return NextResponse.json({ error: 'Invalid action' }, { status: 400 });
+      case 'delete':
+        // ✅ Soft delete
+        updateData = { isActive: false, status: 'sold' };
+        successMessage = `${propertyIds.length} properties deleted`;
+        break;
+      case 'restore':
+        // ✅ Restore deleted
+        updateData = { isActive: true, status: 'for-sale' };
+        successMessage = `${propertyIds.length} properties restored`;
+        break;
+      case 'feature':
+        updateData = { featured: true };
+        successMessage = `${propertyIds.length} properties featured`;
+        break;
+      case 'unfeature':
+        updateData = { featured: false };
+        successMessage = `${propertyIds.length} properties unfeatured`;
+        break;
+      case 'permanent-delete':
+        // ✅ Hard delete
+        await Property.deleteMany({ _id: { $in: propertyIds } });
+        return NextResponse.json({ 
+          success: true, 
+          message: `${propertyIds.length} properties permanently deleted` 
+        });
+      default:
+        return NextResponse.json({ error: 'Invalid action' }, { status: 400 });
     }
 
     await Property.updateMany({ _id: { $in: propertyIds } }, updateData);
 
-    return NextResponse.json({ success: true, message: `${propertyIds.length} properties updated` });
+    return NextResponse.json({ success: true, message: successMessage });
   } catch (error) {
+    console.error('Error:', error);
     return NextResponse.json({ error: 'Failed to update' }, { status: 500 });
   }
 }
