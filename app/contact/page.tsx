@@ -42,12 +42,12 @@ export default function ContactPage() {
               {
                 icon: '📍',
                 title: 'Address',
-                content: 'Durbar Marg, Kathmandu, Nepal',
+                content: 'Srijananagar, Bhaktapur, Nepal',
               },
               {
                 icon: '📞',
                 title: 'Phone',
-                content: '+977-1-4XXXXXX',
+                content: '+977-9862340551',
               },
               {
                 icon: '✉️',

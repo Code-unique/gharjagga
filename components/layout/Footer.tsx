@@ -94,7 +94,7 @@ export default function Footer() {
                 </span>
                 <div>
                   <p className="text-white font-medium">Address</p>
-                  <p className="text-gray-400 text-sm">Durbar Marg, Kathmandu, Nepal</p>
+                  <p className="text-gray-400 text-sm">Srijananagar, Bhaktapur, Nepal</p>
                 </div>
               </li>
               <li className="flex items-start space-x-3">
@@ -103,8 +103,8 @@ export default function Footer() {
                 </span>
                 <div>
                   <p className="text-white font-medium">Phone</p>
-                  <a href="tel:+977-1-4XXXXXX" className="text-gray-400 text-sm hover:text-white">
-                    +977-1-4XXXXXX
+                  <a href="tel:+9779862340551" className="text-gray-400 text-sm hover:text-white">
+                    +9779862340551
                   </a>
                 </div>
               </li>
@@ -114,7 +114,7 @@ export default function Footer() {
                 </span>
                 <div>
                   <p className="text-white font-medium">Email</p>
-                  <a href="mailto:info@nepalrealestate.com" className="text-gray-400 text-sm hover:text-white">
+                  <a href="mailto:uniqueadhikari25@gmail.com" className="text-gray-400 text-sm hover:text-white">
                     info@nepalrealestate.com
                   </a>
                 </div>
